@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live Attack Map (Simulated)</title>
+<meta name="description" content="An animated world map of simulated cyber attacks. Decorative demo using random data, not real network traffic.">
+<style>
+  :root {
+    --bg: #05070d;
+    --panel: rgba(11,16,24,0.82);
+    --border: #1b2433;
+    --text: #e6edf3;
+    --muted: #7d8899;
+    --accent: #37e0c8;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    overflow: hidden;
+  }
+  #map { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+
+  .topbar {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 3;
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 12px 16px;
+    background: linear-gradient(to bottom, rgba(5,7,13,0.9), rgba(5,7,13,0));
+  }
+  .title { font-size: 1rem; font-weight: 700; letter-spacing: 0.02em; }
+  .badge {
+    font-size: 0.68rem; font-weight: 700; letter-spacing: 0.08em;
+    color: #ffd25a; border: 1px solid rgba(255,210,90,0.5);
+    background: rgba(255,210,90,0.08); padding: 3px 8px; border-radius: 999px;
+  }
+  .disclaimer { color: var(--muted); font-size: 0.74rem; margin-left: auto; }
+
+  .counter {
+    position: fixed; z-index: 3; top: 56px; left: 16px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 10px 14px; backdrop-filter: blur(4px);
+  }
+  .counter .n { font-size: 1.5rem; font-weight: 700; color: var(--accent); }
+  .counter .k { font-size: 0.68rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+
+  .legend {
+    position: fixed; z-index: 3; top: 56px; right: 16px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 10px 12px; backdrop-filter: blur(4px); font-size: 0.74rem;
+  }
+  .legend .row { display: flex; align-items: center; gap: 8px; padding: 2px 0; color: var(--muted); }
+  .legend .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+
+  .feed {
+    position: fixed; z-index: 3; left: 16px; bottom: 16px;
+    width: min(440px, calc(100% - 32px));
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 10px 12px; backdrop-filter: blur(4px);
+  }
+  .feed h2 { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin: 0 0 6px; }
+  .feed ul { list-style: none; margin: 0; padding: 0; }
+  .feed li {
+    display: grid; grid-template-columns: 58px 1fr auto; gap: 8px;
+    font-size: 0.76rem; padding: 3px 0; border-top: 1px solid rgba(27,36,51,0.6);
+    white-space: nowrap; overflow: hidden;
+  }
+  .feed li:first-child { border-top: 0; }
+  .feed .t { color: var(--muted); }
+  .feed .route { overflow: hidden; text-overflow: ellipsis; }
+  .feed .type { font-weight: 700; }
+
+  @media (max-width: 560px) {
+    .disclaimer { display: none; }
+    .legend { display: none; }
+    .counter { top: 52px; padding: 8px 10px; }
+    .feed { font-size: 0.72rem; }
+  }
+</style>
+</head>
+<body>
+  <canvas id="map"></canvas>
+
+  <div class="topbar">
+    <span class="title">Global Threat Map</span>
+    <span class="badge">SIMULATION</span>
+    <span class="disclaimer">Decorative demo. Random data, not real network traffic.</span>
+  </div>
+
+  <div class="counter">
+    <div class="n" id="count">0</div>
+    <div class="k">attacks this session</div>
+  </div>
+
+  <div class="legend" id="legend"></div>
+
+  <div class="feed">
+    <h2>Live feed (simulated)</h2>
+    <ul id="feedList"></ul>
+  </div>
+
+<script>
+(function () {
+  "use strict";
+
+  // ---- Attack types -------------------------------------------------------
+  var TYPES = [
+    { name: "Malware",     color: "#ff5c7a" },
+    { name: "DDoS",        color: "#ffb24d" },
+    { name: "Phishing",    color: "#ffe14d" },
+    { name: "Exploit",     color: "#4dd2ff" },
+    { name: "Brute force", color: "#b388ff" },
+    { name: "Scan",        color: "#37e0c8" }
+  ];
+
+  // ---- Major cities (lat, lon) for endpoints ------------------------------
+  var CITIES = [
+    ["New York", 40.7, -74.0], ["Los Angeles", 34.0, -118.2], ["Toronto", 43.7, -79.4],
+    ["Mexico City", 19.4, -99.1], ["Sao Paulo", -23.5, -46.6], ["Buenos Aires", -34.6, -58.4],
+    ["London", 51.5, -0.1], ["Paris", 48.9, 2.3], ["Berlin", 52.5, 13.4], ["Madrid", 40.4, -3.7],
+    ["Moscow", 55.75, 37.6], ["Istanbul", 41.0, 28.9], ["Lagos", 6.5, 3.4], ["Cairo", 30.0, 31.2],
+    ["Johannesburg", -26.2, 28.0], ["Nairobi", -1.3, 36.8], ["Dubai", 25.2, 55.3],
+    ["Mumbai", 19.0, 72.8], ["Delhi", 28.6, 77.2], ["Singapore", 1.35, 103.8],
+    ["Beijing", 39.9, 116.4], ["Shanghai", 31.2, 121.5], ["Tokyo", 35.7, 139.7],
+    ["Seoul", 37.5, 127.0], ["Sydney", -33.9, 151.2], ["Jakarta", -6.2, 106.8]
+  ];
+
+  // ---- Coarse continent outlines ([lon,lat]) for the dotted land ----------
+  var LAND = [
+    [[-168,66],[-156,71],[-128,70],[-95,70],[-82,73],[-74,68],[-60,58],[-55,50],[-66,45],[-70,41],[-75,35],[-81,25],[-97,26],[-98,18],[-106,23],[-114,30],[-124,34],[-124,42],[-124,48],[-133,54],[-147,60],[-165,60],[-168,66]],
+    [[-81,8],[-77,0],[-80,-6],[-75,-14],[-71,-18],[-70,-23],[-71,-30],[-73,-38],[-74,-45],[-72,-52],[-68,-55],[-65,-50],[-62,-40],[-58,-34],[-48,-25],[-40,-20],[-35,-8],[-35,-5],[-50,0],[-52,5],[-60,8],[-70,12],[-78,9],[-81,8]],
+    [[-10,36],[-9,43],[-2,48],[-5,52],[-5,58],[4,61],[8,63],[11,65],[25,71],[30,70],[28,60],[38,60],[40,50],[30,46],[28,41],[20,40],[15,44],[13,45],[12,37],[8,44],[3,43],[-2,37],[-10,36]],
+    [[-17,21],[-16,14],[-13,8],[-8,5],[-4,5],[4,6],[9,4],[9,-1],[13,-5],[14,-11],[12,-17],[15,-23],[18,-33],[20,-35],[26,-34],[32,-28],[33,-22],[35,-18],[40,-16],[41,-4],[48,0],[51,11],[44,11],[43,12],[40,15],[37,21],[34,28],[32,31],[25,32],[18,31],[10,34],[2,36],[-6,35],[-10,30],[-17,21]],
+    [[30,46],[40,50],[50,52],[55,55],[60,68],[70,72],[90,76],[110,76],[140,73],[160,70],[170,67],[180,65],[180,60],[162,58],[160,52],[155,50],[140,46],[135,44],[130,42],[127,38],[122,30],[120,22],[108,20],[105,10],[103,1],[100,6],[98,8],[92,20],[88,22],[80,8],[77,8],[72,20],[66,25],[60,25],[57,25],[50,28],[48,30],[44,38],[40,40],[35,37],[30,37],[30,46]],
+    [[113,-22],[114,-34],[122,-34],[129,-32],[137,-35],[141,-38],[147,-43],[150,-37],[153,-28],[146,-19],[142,-11],[135,-12],[130,-12],[122,-18],[113,-22]]
+  ];
+
+  function pointInPoly(lon, lat, poly) {
+    var inside = false;
+    for (var i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      var xi = poly[i][0], yi = poly[i][1], xj = poly[j][0], yj = poly[j][1];
+      var hit = ((yi > lat) !== (yj > lat)) &&
+                (lon < (xj - xi) * (lat - yi) / (yj - yi) + xi);
+      if (hit) inside = !inside;
+    }
+    return inside;
+  }
+  function onLand(lon, lat) {
+    for (var i = 0; i < LAND.length; i++) if (pointInPoly(lon, lat, LAND[i])) return true;
+    return false;
+  }
+
+  // ---- Canvas + projection ------------------------------------------------
+  var canvas = document.getElementById("map");
+  var ctx = canvas.getContext("2d");
+  var W = 0, H = 0, DPR = 1;
+  var dots = [];       // land dots in lon/lat
+  var marginY = 0, mapH = 0;
+
+  function project(lon, lat) {
+    // Equirectangular, letterboxed vertically so the 2:1 map keeps its ratio.
+    var x = (lon + 180) / 360 * W;
+    var y = marginY + (90 - lat) / 180 * mapH;
+    return [x, y];
+  }
+
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.width = W * DPR; canvas.height = H * DPR;
+    canvas.style.width = W + "px"; canvas.style.height = H + "px";
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+
+    // Fit a 2:1 map inside the viewport, centred.
+    mapH = Math.min(H, W / 2);
+    marginY = (H - mapH) / 2;
+
+    buildDots();
+  }
+
+  function buildDots() {
+    dots = [];
+    var step = Math.max(2.0, 420 / (W / 3));   // denser on big screens
+    for (var lat = -56; lat <= 78; lat += step) {
+      for (var lon = -178; lon <= 180; lon += step) {
+        if (onLand(lon, lat)) dots.push([lon, lat]);
+      }
+    }
+  }
+
+  // ---- Attacks ------------------------------------------------------------
+  var attacks = [];
+  var feed = [];
+  var total = 0;
+  var countEl = document.getElementById("count");
+  var feedListEl = document.getElementById("feedList");
+
+  function spawn() {
+    var a = CITIES[(Math.random() * CITIES.length) | 0];
+    var b = CITIES[(Math.random() * CITIES.length) | 0];
+    if (a === b) return;
+    var type = TYPES[(Math.random() * TYPES.length) | 0];
+    attacks.push({ from: a, to: b, type: type, t: 0, speed: 0.006 + Math.random() * 0.006, done: false });
+
+    total++;
+    countEl.textContent = total.toLocaleString();
+
+    var port = [22, 80, 443, 445, 3389, 8080, 53, 25][(Math.random() * 8) | 0];
+    feed.unshift({
+      time: new Date().toLocaleTimeString([], { hour12: false }),
+      route: a[0] + "  →  " + b[0],
+      type: type.name, color: type.color, port: port
+    });
+    if (feed.length > 8) feed.pop();
+    renderFeed();
+  }
+
+  function renderFeed() {
+    var html = "";
+    for (var i = 0; i < feed.length; i++) {
+      var e = feed[i];
+      html += '<li><span class="t">' + e.time + '</span>' +
+              '<span class="route">' + e.route + '</span>' +
+              '<span class="type" style="color:' + e.color + '">' + e.type + ':' + e.port + '</span></li>';
+    }
+    feedListEl.innerHTML = html;
+  }
+
+  var impacts = [];
+
+  function drawFrame() {
+    ctx.clearRect(0, 0, W, H);
+
+    // ocean glow
+    var g = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.max(W, H) * 0.7);
+    g.addColorStop(0, "#0a1526");
+    g.addColorStop(1, "#05070d");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+
+    // graticule
+    ctx.strokeStyle = "rgba(55,224,200,0.05)";
+    ctx.lineWidth = 1;
+    for (var lon = -180; lon <= 180; lon += 30) {
+      var p1 = project(lon, 85), p2 = project(lon, -60);
+      ctx.beginPath(); ctx.moveTo(p1[0], p1[1]); ctx.lineTo(p2[0], p2[1]); ctx.stroke();
+    }
+    for (var lat = -60; lat <= 80; lat += 30) {
+      var q1 = project(-180, lat), q2 = project(180, lat);
+      ctx.beginPath(); ctx.moveTo(q1[0], q1[1]); ctx.lineTo(q2[0], q2[1]); ctx.stroke();
+    }
+
+    // land dots
+    ctx.fillStyle = "rgba(90,130,160,0.55)";
+    var r = Math.max(0.8, mapH / 520);
+    for (var i = 0; i < dots.length; i++) {
+      var p = project(dots[i][0], dots[i][1]);
+      ctx.beginPath(); ctx.arc(p[0], p[1], r, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // attacks
+    for (var k = attacks.length - 1; k >= 0; k--) {
+      var at = attacks[k];
+      at.t += at.speed;
+      var s = project(at.from[2], at.from[1]);
+      var e = project(at.to[2], at.to[1]);
+      var mx = (s[0] + e[0]) / 2;
+      var my = (s[1] + e[1]) / 2;
+      var dist = Math.hypot(e[0] - s[0], e[1] - s[1]);
+      var lift = Math.min(dist * 0.35, mapH * 0.4);
+      var cx = mx, cy = my - lift;     // control point lifted upward
+
+      var tt = Math.min(at.t, 1);
+      // trail
+      ctx.lineWidth = 1.4;
+      ctx.strokeStyle = at.type.color;
+      ctx.globalAlpha = 0.35;
+      ctx.beginPath();
+      ctx.moveTo(s[0], s[1]);
+      var trailStart = Math.max(0, tt - 0.5);
+      // draw the arc up to current t
+      ctx.beginPath();
+      for (var u = trailStart; u <= tt; u += 0.02) {
+        var pt = quad(s, [cx, cy], e, u);
+        if (u === trailStart) ctx.moveTo(pt[0], pt[1]); else ctx.lineTo(pt[0], pt[1]);
+      }
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+
+      // head
+      var head = quad(s, [cx, cy], e, tt);
+      ctx.fillStyle = at.type.color;
+      ctx.shadowColor = at.type.color; ctx.shadowBlur = 10;
+      ctx.beginPath(); ctx.arc(head[0], head[1], 2.4, 0, Math.PI * 2); ctx.fill();
+      ctx.shadowBlur = 0;
+
+      if (at.t >= 1 && !at.done) {
+        at.done = true;
+        impacts.push({ x: e[0], y: e[1], r: 0, color: at.type.color });
+      }
+      if (at.t >= 1.5) attacks.splice(k, 1);
+    }
+
+    // source/target city dots (static points)
+    for (var c = 0; c < CITIES.length; c++) {
+      var cp = project(CITIES[c][2], CITIES[c][1]);
+      ctx.fillStyle = "rgba(55,224,200,0.75)";
+      ctx.beginPath(); ctx.arc(cp[0], cp[1], 1.6, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // impact pulses
+    for (var m = impacts.length - 1; m >= 0; m--) {
+      var im = impacts[m];
+      im.r += 0.9;
+      ctx.strokeStyle = im.color;
+      ctx.globalAlpha = Math.max(0, 1 - im.r / 22);
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(im.x, im.y, im.r, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = 1;
+      if (im.r > 22) impacts.splice(m, 1);
+    }
+
+    requestAnimationFrame(drawFrame);
+  }
+
+  function quad(p0, p1, p2, t) {
+    var mt = 1 - t;
+    return [
+      mt * mt * p0[0] + 2 * mt * t * p1[0] + t * t * p2[0],
+      mt * mt * p0[1] + 2 * mt * t * p1[1] + t * t * p2[1]
+    ];
+  }
+
+  // ---- Legend -------------------------------------------------------------
+  (function legend() {
+    var el = document.getElementById("legend");
+    var html = "";
+    for (var i = 0; i < TYPES.length; i++) {
+      html += '<div class="row"><span class="dot" style="background:' + TYPES[i].color + '"></span>' + TYPES[i].name + '</div>';
+    }
+    el.innerHTML = html;
+  })();
+
+  window.addEventListener("resize", resize);
+  resize();
+  renderFeed();
+  requestAnimationFrame(drawFrame);
+  setInterval(spawn, 650);
+  // a small burst at the start so it looks alive immediately
+  for (var b = 0; b < 4; b++) setTimeout(spawn, b * 150);
+})();
+</script>
+</body>
+</html>
