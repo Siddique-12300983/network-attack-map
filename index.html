@@ -36,6 +36,11 @@
     color: #ffd25a; border: 1px solid rgba(255,210,90,0.5);
     background: rgba(255,210,90,0.08); padding: 3px 8px; border-radius: 999px;
   }
+  .pausebtn {
+    background: var(--panel); color: var(--text); border: 1px solid var(--border);
+    border-radius: 999px; padding: 4px 14px; font: inherit; font-size: 0.74rem; cursor: pointer;
+  }
+  .pausebtn:hover { border-color: var(--accent); }
   .disclaimer { color: var(--muted); font-size: 0.74rem; margin-left: auto; }
 
   .counter {
@@ -86,6 +91,7 @@
   <div class="topbar">
     <span class="title">Global Threat Map</span>
     <span class="badge">SIMULATION</span>
+    <button id="pause" class="pausebtn" type="button" aria-pressed="false">Pause</button>
     <span class="disclaimer">Decorative demo. Random data, not real network traffic.</span>
   </div>
 
@@ -322,7 +328,7 @@
       if (im.r > 22) impacts.splice(m, 1);
     }
 
-    requestAnimationFrame(drawFrame);
+    if (running) requestAnimationFrame(drawFrame);
   }
 
   function quad(p0, p1, p2, t) {
@@ -343,13 +349,34 @@
     el.innerHTML = html;
   })();
 
+  var running = true;
+  var spawnTimer = null;
+  function startSpawning() { if (!spawnTimer) spawnTimer = setInterval(spawn, 650); }
+  function stopSpawning() { clearInterval(spawnTimer); spawnTimer = null; }
+
+  var pauseBtn = document.getElementById("pause");
+  pauseBtn.addEventListener("click", function () {
+    running = !running;
+    pauseBtn.textContent = running ? "Pause" : "Resume";
+    pauseBtn.setAttribute("aria-pressed", String(!running));
+    if (running) { startSpawning(); requestAnimationFrame(drawFrame); } else { stopSpawning(); }
+  });
+
+  // Respect the OS "reduce motion" setting: start paused and slow the feed.
+  var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
   window.addEventListener("resize", resize);
   resize();
   renderFeed();
   requestAnimationFrame(drawFrame);
-  setInterval(spawn, 650);
-  // a small burst at the start so it looks alive immediately
-  for (var b = 0; b < 4; b++) setTimeout(spawn, b * 150);
+  if (reduce) {
+    running = false;
+    pauseBtn.textContent = "Resume";
+    pauseBtn.setAttribute("aria-pressed", "true");
+  } else {
+    startSpawning();
+    for (var b = 0; b < 4; b++) setTimeout(spawn, b * 150);
+  }
 })();
 </script>
 </body>
